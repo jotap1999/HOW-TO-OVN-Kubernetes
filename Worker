@@ -44,7 +44,7 @@ export CLUSTER_IP_SUBNET=192.168.0.0/16
 export NODE_NAME=`hostname`
 export SERVICE_IP_SUBNET=172.16.1.0/24
 export TOKEN=xxxxxxxxxxxxxxx 	#Executado o seguinte comando no MASTER e copiar a token:
-								#kubectl describe secret $(kubectl get secrets | grep default | cut -f1 -d ' ') | grep -E '^token' | cut -f2 -d':' | tr -d '\t'
+				#kubectl describe secret $(kubectl get secrets | grep default | cut -f1 -d ' ') | grep -E '^token' | cut -f2 -d':' | tr -d '\t'
 export KUBECONFIG_FILE=/etc/kubernetes/kubelet.conf
 
 
