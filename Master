@@ -1,0 +1,102 @@
+################################################################
+							Master
+################################################################
+#NOTA:
+#Executar os seguintes comando com um utilizador normal
+#sem ser o root, mas com permissão de sudo
+#e com o kubeadm já iniciado.
+
+sudo apt-get install apt-transport-https
+echo "deb http://3.19.28.122/openvswitch/stable /" |  sudo tee /etc/apt/sources.list.d/openvswitch.list
+wget -O - http://3.19.28.122/openvswitch/keyFile |  sudo apt-key add -
+
+sudo apt-get update
+sudo apt-get build-dep dkms
+sudo apt-get install python-six openssl -y
+sudo apt-get install openvswitch-datapath-dkms -y
+sudo apt-get install openvswitch-switch openvswitch-common -y
+sudo apt-get install ovn-central ovn-common ovn-host  python-pip -y
+
+cd /tmp
+wget https://dl.google.com/go/go1.14.5.linux-amd64.tar.gz
+sudo tar -xvf go1.14.5.linux-amd64.tar.gz
+sudo mv go /usr/local
+export GOROOT=/usr/local/go
+export GOPATH=$HOME/go
+export PATH=$GOPATH/bin:$GOROOT/bin:$PATH
+echo "export GOROOT=/usr/local/go" >> ~/.profile
+echo "export GOPATH=$HOME/go" >> ~/.profile
+echo "export PATH=$GOPATH/bin:$GOROOT/bin:$PATH" >> ~/.profile
+
+cd
+mkdir -p $GOPATH/github.com/ovn-org
+cd $GOPATH/github.com/ovn-org
+git clone https://github.com/ovn-org/ovn-kubernetes
+cd ovn-kubernetes/go-controller
+make
+sudo make install
+
+
+export LOCAL_IP=X.X.X.X 		
+export MASTER_IP=$LOCAL_IP
+export NET_CIDR=192.168.0.0/16 #Intervalo de IPs para cada node, que irá distribuir por cada pod
+export SVR_CIDR=172.16.1.0/24  #Intervalo de IPs para os serviços 
+
+
+mkdir -p $HOME/work/src/github.com/ovn-org
+cd $HOME/work/src/github.com/ovn-org
+git clone https://github.com/ovn-org/ovn-kubernetes
+cd $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/images
+./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-u:latest \
+    --net-cidr=$NET_CIDR --svc-cidr=$SVR_CIDR \ 
+    --gateway-mode="local" \
+    --k8s-apiserver=https://$MASTER_IP:6443
+
+sudo reboot
+
+#######################################################################
+
+sudo ovn-nbctl set-connection ptcp:6641
+sudo ovn-sbctl set-connection ptcp:6642
+sudo /usr/share/openvswitch/scripts/ovn-ctl start_northd
+sudo /usr/share/openvswitch/scripts/ovn-ctl start_controller
+
+
+#Apply OVN DaemonSet and Deployment yamls.
+kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovn-setup.yaml
+kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovnkube-db.yaml
+kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovnkube-master.yaml
+kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovnkube-node.yaml
+
+
+export MASTER_IP=X.X.X.X
+export CENTRAL_IP=$MASTER_IP
+export CLUSTER_IP_SUBNET=192.168.0.0/16 
+export NODE_NAME=`hostname`
+export SERVICE_IP_SUBNET=172.16.1.0/24
+
+export TOKEN=$(kubectl describe secret $(kubectl get secrets | grep default | cut -f1 -d ' ') | grep -E '^token' | cut -f2 -d':' | tr -d '\t')
+
+export KUBECONFIG_FILE=$HOME/.kube/config
+
+nohup sudo ovnkube -k8s-kubeconfig  $KUBECONFIG_FILE \
+ -loglevel=4 \
+ -k8s-apiserver="http://$CENTRAL_IP:8080" \
+ -logfile="/var/log/ovn-kubernetes/ovnkube.log" \
+ -init-master=$NODE_NAME -init-node=$NODE_NAME \
+ -cluster-subnets="$CLUSTER_IP_SUBNET" \
+ -k8s-service-cidr=$SERVICE_IP_SUBNET \
+ -nodeport \
+ -init-gateways -gateway-local \
+ -k8s-token="$TOKEN" \
+ -nb-address="tcp:$CENTRAL_IP:6641" \
+ -sb-address="tcp:$CENTRAL_IP:6642" 2>&1 &
+
+#log do OVNKUBE
+tail -f /var/log/ovn-kubernetes/ovnkube.log
+
+#get nodes
+kubectl get nodes
+
+#get todos os tipos pods
+kubectl get pods --all-namespaces

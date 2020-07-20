@@ -1,0 +1,62 @@
+################################################################
+							Worker
+################################################################
+sudo apt-get install apt-transport-https
+echo "deb http://3.19.28.122/openvswitch/stable /" |  sudo tee /etc/apt/sources.list.d/openvswitch.list
+wget -O - http://3.19.28.122/openvswitch/keyFile |  sudo apt-key add -
+
+sudo apt-get update
+sudo apt-get build-dep dkms
+sudo apt-get install python-six openssl -y
+sudo apt-get install openvswitch-datapath-dkms -y
+sudo apt-get install openvswitch-switch openvswitch-common -y
+sudo apt-get install ovn-host ovn-common -y
+
+cd /tmp
+wget https://dl.google.com/go/go1.14.5.linux-amd64.tar.gz
+sudo tar -xvf go1.14.5.linux-amd64.tar.gz
+sudo mv go /usr/local
+export GOROOT=/usr/local/go
+export GOPATH=$HOME/go
+export PATH=$GOPATH/bin:$GOROOT/bin:$PATH
+echo "export GOROOT=/usr/local/go" >> ~/.profile
+echo "export GOPATH=$HOME/go" >> ~/.profile
+echo "export PATH=$GOPATH/bin:$GOROOT/bin:$PATH" >> ~/.profile
+
+cd
+mkdir -p $GOPATH/github.com/ovn-org
+cd $GOPATH/github.com/ovn-org
+git clone https://github.com/ovn-org/ovn-kubernetes
+cd ovn-kubernetes/go-controller
+make
+sudo make install
+
+sudo reboot
+
+
+#NOTA: 
+#Com o Worker já conectado ao master
+
+
+export MASTER_IP=X.X.X.X
+export CENTRAL_IP=$MASTER_IP
+export CLUSTER_IP_SUBNET=192.168.0.0/16 
+export NODE_NAME=`hostname`
+export SERVICE_IP_SUBNET=172.16.1.0/24
+export TOKEN=xxxxxxxxxxxxxxx 	#Executado o seguinte comando no MASTER e copiar a token:
+								#kubectl describe secret $(kubectl get secrets | grep default | cut -f1 -d ' ') | grep -E '^token' | cut -f2 -d':' | tr -d '\t'
+export KUBECONFIG_FILE=/etc/kubernetes/kubelet.conf
+
+
+nohup sudo ovnkube -k8s-kubeconfig  $KUBECONFIG_FILE \
+ -loglevel=4 \
+ -k8s-apiserver="http://$CENTRAL_IP:8080" \
+ -logfile="/var/log/ovn-kubernetes/ovnkube.log" \
+ -init-master=$NODE_NAME -init-node=$NODE_NAME \
+ -cluster-subnets="$CLUSTER_IP_SUBNET" \
+ -k8s-service-cidr=$SERVICE_IP_SUBNET \
+ -nodeport \
+ -init-gateways -gateway-local \
+ -k8s-token="$TOKEN" \
+ -nb-address="tcp:$CENTRAL_IP:6641" \
+ -sb-address="tcp:$CENTRAL_IP:6642" 2>&1 &
